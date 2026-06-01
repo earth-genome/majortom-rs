@@ -1,0 +1,28 @@
+[package]
+name = "majortom"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "A Rust implementation of the ESA Major TOM equal-area grid, with behavioural parity to the earth-genome Go and Python ports."
+license = "MIT"
+repository = "https://github.com/earth-genome/majortom-rs"
+homepage = "https://github.com/earth-genome/majortom-rs"
+documentation = "https://docs.rs/majortom"
+readme = "README.md"
+keywords = ["geospatial", "grid", "geohash", "major-tom", "esa"]
+categories = ["science::geo"]
+
+[dependencies]
+geo = "0.29"
+thiserror = "2"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bench]]
+name = "grid_bench"
+harness = false
+
+[dev-dependencies.criterion]
+version = "0.5"
