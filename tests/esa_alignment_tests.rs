@@ -106,7 +106,7 @@ fn equator_on_grid_line() {
         let grid = MajorTomGrid::new(dist_m, false).unwrap();
         let lats = eg_latitudes(&grid);
         assert!(
-            lats.iter().any(|&l| l == 0.0),
+            lats.contains(&0.0),
             "dist={dist_km}km: equator (0.0) should be a grid line"
         );
     }
@@ -120,7 +120,7 @@ fn prime_meridian_on_grid_line() {
         for test_lat in [0.0, 30.0, 60.0] {
             let lons = eg_longitudes(&grid, test_lat, dist_m as f64);
             assert!(
-                lons.iter().any(|&l| l == 0.0),
+                lons.contains(&0.0),
                 "dist={dist_km}km, lat={test_lat}: prime meridian (0.0) should be a grid line"
             );
         }
