@@ -43,4 +43,5 @@ mod grid;
 
 pub use cell::GridCell;
 pub use error::GridError;
+pub use geohash::{decode as decode_geohash, encode as encode_geohash};
 pub use grid::MajorTomGrid;

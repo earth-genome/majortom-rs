@@ -165,3 +165,24 @@ fn ids_are_unique_within_an_aoi() {
         );
     }
 }
+
+#[test]
+fn large_aoi_parallel_path_is_deterministic() {
+    use std::collections::HashSet;
+    // ~1° box → hundreds of latitude rows → rayon path (threshold 32).
+    let aoi = polygon(&[
+        (-77.5, 39.0),
+        (-77.5, 40.0),
+        (-76.5, 40.0),
+        (-76.5, 39.0),
+        (-77.5, 39.0),
+    ]);
+    let grid = MajorTomGrid::new(320, true).unwrap();
+    let a = grid.generate_grid_cells(&aoi);
+    let b = grid.generate_grid_cells(&aoi);
+    assert!(!a.is_empty());
+    let set_a: HashSet<_> = a.iter().map(|c| c.id().to_string()).collect();
+    let set_b: HashSet<_> = b.iter().map(|c| c.id().to_string()).collect();
+    assert_eq!(a.len(), set_a.len(), "ids must be unique");
+    assert_eq!(set_a, set_b, "parallel runs must yield the same cell set");
+}

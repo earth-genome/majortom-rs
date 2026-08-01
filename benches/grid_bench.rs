@@ -31,6 +31,20 @@ fn big_southampton() -> Polygon<f64> {
     )
 }
 
+/// ~1° × 1° box — enough latitude rows to exercise the rayon path.
+fn large_maryland() -> Polygon<f64> {
+    Polygon::new(
+        LineString::new(vec![
+            Coord { x: -77.5, y: 39.0 },
+            Coord { x: -77.5, y: 40.0 },
+            Coord { x: -76.5, y: 40.0 },
+            Coord { x: -76.5, y: 39.0 },
+            Coord { x: -77.5, y: 39.0 },
+        ]),
+        vec![],
+    )
+}
+
 fn bench_generate(c: &mut Criterion) {
     let poly = big_southampton();
     let grid = MajorTomGrid::new(320, true).unwrap();
@@ -44,12 +58,31 @@ fn bench_generate(c: &mut Criterion) {
     });
 }
 
-fn bench_cell_from_id(c: &mut Criterion) {
+fn bench_generate_large(c: &mut Criterion) {
+    let poly = large_maryland();
     let grid = MajorTomGrid::new(320, true).unwrap();
-    c.bench_function("cell_from_id", |b| {
-        b.iter(|| grid.cell_from_id(black_box("dr19n8f7v6e")).unwrap())
+    c.bench_function("generate_grid_cells_large_overlap", |b| {
+        b.iter(|| grid.generate_grid_cells(black_box(&poly)))
+    });
+
+    let grid_no = MajorTomGrid::new(320, false).unwrap();
+    c.bench_function("generate_grid_cells_large_no_overlap", |b| {
+        b.iter(|| grid_no.generate_grid_cells(black_box(&poly)))
     });
 }
 
-criterion_group!(benches, bench_generate, bench_cell_from_id);
+fn bench_cell_from_id(c: &mut Criterion) {
+    let grid = MajorTomGrid::new(320, true).unwrap();
+    // Known-good id from the Southampton AOI (see grid_tests).
+    c.bench_function("cell_from_id", |b| {
+        b.iter(|| grid.cell_from_id(black_box("dr18yzvf3fv")).unwrap())
+    });
+}
+
+criterion_group!(
+    benches,
+    bench_generate,
+    bench_generate_large,
+    bench_cell_from_id
+);
 criterion_main!(benches);

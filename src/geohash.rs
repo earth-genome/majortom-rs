@@ -27,7 +27,7 @@ fn base32_index(c: u8) -> Option<u8> {
 ///
 /// Uses the same interval-bisection scheme (with a `>=` midpoint comparison) as
 /// `geolib` and `pierrre/geohash`.
-pub(crate) fn encode(lat: f64, lon: f64, precision: usize) -> String {
+pub fn encode(lat: f64, lon: f64, precision: usize) -> String {
     let mut lat_min = -90.0f64;
     let mut lat_max = 90.0f64;
     let mut lon_min = -180.0f64;
@@ -74,7 +74,7 @@ pub(crate) fn encode(lat: f64, lon: f64, precision: usize) -> String {
 ///
 /// Mirrors the bisection used by the reference libraries and returns the
 /// midpoint of the resulting latitude/longitude interval.
-pub(crate) fn decode(hash: &str) -> Result<(f64, f64), GridError> {
+pub fn decode(hash: &str) -> Result<(f64, f64), GridError> {
     if hash.is_empty() {
         return Err(GridError::InvalidCellId);
     }

@@ -14,7 +14,9 @@ categories = ["science::geo"]
 
 [dependencies]
 geo = "0.29"
+rayon = "1.10"
 thiserror = "2"
+wide = "0.7.28"
 
 [dev-dependencies]
 serde = { version = "1", features = ["derive"] }

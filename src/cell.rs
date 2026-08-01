@@ -1,4 +1,4 @@
-use geo::{Coord, LineString, Polygon};
+use geo::{BoundingRect, Coord, LineString, Polygon};
 
 use crate::geohash::encode;
 
@@ -71,5 +71,17 @@ impl GridCell {
     /// centroid.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Returns `(min_lon, min_lat, max_lon, max_lat)` of the cell rectangle.
+    ///
+    /// Handy for FFI boundaries that reconstruct geometry on the other side
+    /// without serialising a full [`Polygon`].
+    pub fn bbox(&self) -> (f64, f64, f64, f64) {
+        let b = self
+            .geom
+            .bounding_rect()
+            .expect("grid cells always have a bounding rect");
+        (b.min().x, b.min().y, b.max().x, b.max().y)
     }
 }
