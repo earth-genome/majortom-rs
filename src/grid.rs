@@ -18,26 +18,70 @@ const EPSILON: f64 = 1e-10;
 /// dominates for typical small AOIs.
 const PARALLEL_ROW_THRESHOLD: i64 = 32;
 
-/// AOI bounding box used to bound the row/column search and for the cheap AABB
-/// prefilter. `max_lon` may be expanded by +360° when the AOI crosses the
+/// An axis-aligned lon/lat rectangle, used both for the AOI search bounds and
+/// for individual candidate cells.
+///
+/// For an AOI, `max_lon` may be expanded by +360° when the polygon crosses the
 /// antimeridian (matching the Go/Python ports).
 #[derive(Clone, Copy)]
-struct AoiBounds {
+struct Bbox {
     min_lon: f64,
     min_lat: f64,
     max_lon: f64,
     max_lat: f64,
 }
 
-/// Returns true when the axis-aligned cell bbox overlaps the AOI bbox.
-///
-/// Matches the inline pre-check in the Go `mtgrid` implementation.
-#[inline]
-fn aabb_overlaps(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64, aoi: AoiBounds) -> bool {
-    !(max_lon < aoi.min_lon
-        || min_lon > aoi.max_lon
-        || max_lat < aoi.min_lat
-        || min_lat > aoi.max_lat)
+impl Bbox {
+    #[inline]
+    fn new(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64) -> Self {
+        Bbox {
+            min_lon,
+            min_lat,
+            max_lon,
+            max_lat,
+        }
+    }
+
+    /// Returns true when this rectangle overlaps `aoi`.
+    ///
+    /// Matches the inline pre-check in the Go `mtgrid` implementation.
+    #[inline]
+    fn overlaps(self, aoi: Bbox) -> bool {
+        !(self.max_lon < aoi.min_lon
+            || self.min_lon > aoi.max_lon
+            || self.max_lat < aoi.min_lat
+            || self.min_lat > aoi.max_lat)
+    }
+
+    /// Returns true when this rectangle intersects `polygon`.
+    ///
+    /// Uses [`Rect`] so we can reject candidates without allocating a
+    /// [`GridCell`] (geohash encode + polygon ring).
+    #[inline]
+    fn intersects_polygon(self, polygon: &Polygon<f64>) -> bool {
+        Rect::new(
+            Coord {
+                x: self.min_lon,
+                y: self.min_lat,
+            },
+            Coord {
+                x: self.max_lon,
+                y: self.max_lat,
+            },
+        )
+        .intersects(polygon)
+    }
+
+    #[inline]
+    fn into_cell(self, is_primary: bool) -> GridCell {
+        GridCell::from_bbox(
+            self.min_lon,
+            self.min_lat,
+            self.max_lon,
+            self.max_lat,
+            is_primary,
+        )
+    }
 }
 
 /// SIMD longitude AABB mask for four candidate cells that already share a
@@ -46,7 +90,7 @@ fn aabb_overlaps(min_lon: f64, min_lat: f64, max_lon: f64, max_lat: f64, aoi: Ao
 /// Returns per-lane booleans (via the cmp mask's `to_array`), avoiding
 /// `move_mask` bit-order ambiguity across AVX / non-AVX backends.
 #[inline]
-fn lon_aabb_lanes(min_lons: f64x4, max_lons: f64x4, aoi: AoiBounds) -> [bool; 4] {
+fn lon_aabb_lanes(min_lons: f64x4, max_lons: f64x4, aoi: Bbox) -> [bool; 4] {
     let ge = max_lons.cmp_ge(f64x4::splat(aoi.min_lon));
     let le = min_lons.cmp_le(f64x4::splat(aoi.max_lon));
     let bits = (ge & le).to_array();
@@ -58,51 +102,18 @@ fn lon_aabb_lanes(min_lons: f64x4, max_lons: f64x4, aoi: AoiBounds) -> [bool; 4]
     ]
 }
 
-/// Returns true when the axis-aligned cell bbox intersects `polygon`.
-///
-/// Uses [`Rect`] so we can reject candidates without allocating a
-/// [`GridCell`] (geohash encode + polygon ring).
-#[inline]
-fn cell_intersects(
-    polygon: &Polygon<f64>,
-    min_lon: f64,
-    min_lat: f64,
-    max_lon: f64,
-    max_lat: f64,
-) -> bool {
-    Rect::new(
-        Coord {
-            x: min_lon,
-            y: min_lat,
-        },
-        Coord {
-            x: max_lon,
-            y: max_lat,
-        },
-    )
-    .intersects(polygon)
-}
-
 /// Push a cell when it passes the AOI AABB prefilter and a precise `Rect`
 /// intersection against `polygon`.
 #[inline]
 fn maybe_push_cell(
     cells: &mut Vec<GridCell>,
     polygon: &Polygon<f64>,
-    aoi: AoiBounds,
-    min_lon: f64,
-    min_lat: f64,
-    max_lon: f64,
-    max_lat: f64,
+    aoi: Bbox,
+    cell: Bbox,
     is_primary: bool,
 ) {
-    if !aabb_overlaps(min_lon, min_lat, max_lon, max_lat, aoi) {
-        return;
-    }
-    if cell_intersects(polygon, min_lon, min_lat, max_lon, max_lat) {
-        cells.push(GridCell::from_bbox(
-            min_lon, min_lat, max_lon, max_lat, is_primary,
-        ));
+    if cell.overlaps(aoi) && cell.intersects_polygon(polygon) {
+        cells.push(cell.into_cell(is_primary));
     }
 }
 
@@ -217,12 +228,7 @@ impl MajorTomGrid {
         if min_lon > max_lon {
             max_lon += 360.0;
         }
-        let aoi = AoiBounds {
-            min_lon,
-            min_lat,
-            max_lon,
-            max_lat,
-        };
+        let aoi = Bbox::new(min_lon, min_lat, max_lon, max_lat);
 
         let mut start_row = ((min_lat + 90.0 - self.lat_offset) / self.lat_spacing).floor() as i64;
         let mut end_row = ((max_lat + 90.0 - self.lat_offset) / self.lat_spacing).ceil() as i64;
@@ -258,7 +264,7 @@ impl MajorTomGrid {
         &self,
         row_idx: i64,
         polygon: &Polygon<f64>,
-        aoi: AoiBounds,
+        aoi: Bbox,
         half_lat_spacing: f64,
     ) -> Vec<GridCell> {
         let lat = self.row_lat(row_idx);
@@ -309,15 +315,9 @@ impl MajorTomGrid {
                             continue;
                         }
                         let lon = min_arr[lane];
-                        let cell_max_lon = lon + lon_spacing;
-                        if cell_intersects(polygon, lon, lat, cell_max_lon, cell_max_lat) {
-                            cells.push(GridCell::from_bbox(
-                                lon,
-                                lat,
-                                cell_max_lon,
-                                cell_max_lat,
-                                true,
-                            ));
+                        let cell = Bbox::new(lon, lat, lon + lon_spacing, cell_max_lat);
+                        if cell.intersects_polygon(polygon) {
+                            cells.push(cell.into_cell(true));
                         }
                     }
                 }
@@ -331,16 +331,9 @@ impl MajorTomGrid {
                             continue;
                         }
                         let lon = min_arr[lane] + half_lon_spacing;
-                        let cell_max_lon = lon + lon_spacing;
-                        if cell_intersects(polygon, lon, overlap_lat, cell_max_lon, overlap_max_lat)
-                        {
-                            cells.push(GridCell::from_bbox(
-                                lon,
-                                overlap_lat,
-                                cell_max_lon,
-                                overlap_max_lat,
-                                false,
-                            ));
+                        let cell = Bbox::new(lon, overlap_lat, lon + lon_spacing, overlap_max_lat);
+                        if cell.intersects_polygon(polygon) {
+                            cells.push(cell.into_cell(false));
                         }
                     }
                 }
@@ -351,30 +344,19 @@ impl MajorTomGrid {
                 let cell_max_lon = lon + lon_spacing;
 
                 if primary_lat_ok {
-                    maybe_push_cell(
-                        &mut cells,
-                        polygon,
-                        aoi,
-                        lon,
-                        lat,
-                        cell_max_lon,
-                        cell_max_lat,
-                        true,
-                    );
+                    let cell = Bbox::new(lon, lat, cell_max_lon, cell_max_lat);
+                    maybe_push_cell(&mut cells, polygon, aoi, cell, true);
                 }
 
                 if overlap_lat_ok {
                     let overlap_lon = lon + half_lon_spacing;
-                    maybe_push_cell(
-                        &mut cells,
-                        polygon,
-                        aoi,
+                    let cell = Bbox::new(
                         overlap_lon,
                         overlap_lat,
                         overlap_lon + lon_spacing,
                         overlap_max_lat,
-                        false,
                     );
+                    maybe_push_cell(&mut cells, polygon, aoi, cell, false);
                 }
 
                 col_idx += 1;
